@@ -21,6 +21,12 @@ ciltest1: ciltest1.cmx
 run-ciltest1: ciltest1 test1.i main.i
 	./ciltest1
 
+ciltest2: ciltest2.cmx
+	ocamlfind ocamlopt $(OCAMLOPTFLAGS) $(OCAMLOPTINCS) $(OCAMLOPTPACKAGES) $(OCAMLOPTLIBS) $^ -o $@
+run-ciltest2: ciltest2 test1.i main.i
+	./ciltest2
+
+
 openssl-files:
 	find $(LIBOPENSSLDIR) -name '*.i' | \
 		egrep '/(crypto)/' > $@
@@ -37,7 +43,7 @@ openssl-files:
 	ocamlfind ocamlopt $(OCAMLOPTFLAGS) $(OCAMLOPTCINCS) $(OCAMLOPTPACKAGES) -c $<
 
 clean: 
-	rm -f *.s *~ *.bak core *.cmi *.cmo *.cmx *.cma *.o *.so *.a *.i ciltest1 test 
+	rm -f *.s *~ *.bak core *.cmi *.cmo *.cmx *.cma *.o *.so *.a *.i ciltest1 ciltest2 test 
 .SUFFIXES: .c .i .cmo .cmi .cmx .ml .mli
 .PHONY: run-ciltest1 clean
 

@@ -8,6 +8,16 @@
 #include "test1.h"
 static int* test_global = NULL;
 
+/*
+ * If notate p_rsa_st->n as sentitive data, then 
+ * the result should be: 
+ * (int a) 
+ * (int tmp)
+ * (int** test_double_array
+ * (int* test_ret)
+ * (static int* test_global)
+ * Total: 5
+ */
 int* test_hehe(int** i, int c, int *b)
 {
   int* ret = NULL;
@@ -20,9 +30,9 @@ int* test_hehe(int** i, int c, int *b)
 int
 main ()
 {
-  //int** test_double_array=NULL;
+  int** test_double_array=NULL;
 
-  //int* test_ret = NULL; 
+  int* test_ret = NULL; 
   //int a, d;
 
 //  int check_memcpy = 0;
@@ -42,8 +52,8 @@ main ()
   d = d - 1;
   */
   int i_tmp = 7;
-  int a,b,c;
-  a = 0; b = 1; c = 2;
+  int a,b,c,d;
+  a = 0; b = 1; c = 2; d = 3;
   struct rsa_st* p_rsa_st = calloc(sizeof(struct rsa_st), 0);
   struct evp_pkey_st* p_evp_pkey_st = calloc(sizeof(struct evp_pkey_st), 0);
   CERT_PKEY* p_cert_pkey = calloc(sizeof(CERT_PKEY), 0);
@@ -66,7 +76,7 @@ main ()
 
   int tmp = *(p_ssl->cert->pkey->privateKey->pkey.rsa->n); 
 
-  //test_ret = test_hehe(test_double_array,d, &a);
-  printf( "%d", tmp); 
+  test_ret = test_hehe(test_double_array,d, &a);
+  printf( "%d, %08x", tmp, *test_ret); 
   exit (0);
 }
