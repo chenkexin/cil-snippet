@@ -9,10 +9,10 @@ show how CIL works on main.c.
 **ciltest2:**
 begin analysis, the input and output of the analysis is in main.c.
 
-**test1.c test1.h main.c: **
+**test1.c test1.h main.c:**
 the test environment.
 
-**Makefile: **
+**Makefile:**
 makefile.
 
 Usage:
