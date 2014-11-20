@@ -183,10 +183,15 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
            if self#find_var (self#find_var_in_exp e) || self#find_exp e 
            then 
              (* should push the lval into lvalList *)
+             (* this helper function should be refined base on a better
+              * understanding of lval = lhost * loffset.
+              * In another word, only check fst lv is not enough, offset matters
+              * since the pointer may be the offset within an object *)
              let helper =
                match fst lv with
                | Var(v) -> E.log "push var: %s %a\n" v.vname d_loc loc;self#push_var v;
-               | Mem(m) -> self#push_p (snd lv);
+               | Mem(m) -> E.log "push p";self#push_p (snd lv);
+               (* what if the lv is a pointer without offset? *)
              in
              helper;
              DoChildren
