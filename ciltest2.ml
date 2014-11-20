@@ -32,7 +32,7 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
   val mutable fun_arg_list : fun_arg_list_type list = []
 
   (* the list holding  possible pointers *)
-  val mutable pList : lval list = []
+  val mutable pList : offset list = []
 
   method get_varList = varList
 
@@ -45,39 +45,22 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
   method push_fun_arg_list arg_list = fun_arg_list <- arg_list::fun_arg_list;
   last_record.fun_arg_list <- fun_arg_list;
 
-  method push_p p = E.log"\npush_p: %a\n" d_lval p; pList <- p::pList;
+  method push_p p = pList <- p::pList;
   
   (* find if a varinfo exists in varList *)
   method find_var v =   
-        let rec helper t =
-          match t with 
-          | [] -> false
-              (* = : deep equation *)
-              (* == : shallow equation *)
-          | head::tail -> 
-              if (Util.equals head v)  then true
-              else helper tail
-        in
-        helper varList;
+    if List.mem v varList then begin true  end else false
 
   (* find if an exp contains the pointer to {S} *)
   (* input: e exp 
    * output: true or false *)
   method find_exp e = 
-  (* note that the pointers may be contains in another struct,
-   * so we need to process it iterately 'til it reaches the last Mem() *)
-  E.log "in find_Exp: %a" d_exp e;
      let rec match_e e = 
       let rec match_lv lv = 
-        if List.mem lv pList then begin E.log " return true\n"; true end else
           begin
           match fst lv with
-          | Var(v) -> E.log "return false var: %s \n" v.vname ; false
-          | Mem(m) -> 
-              E.log "match:%a " d_exp m;
-              match (snd lv) with
-              | Field(f, o) -> E.log "field: %s\n" f.fname; match_e m
-              | _ -> ();
+          | Var(v) -> false
+          | Mem(m) -> if List.mem (snd lv) pList then begin true end else match_e m;
           match_e m
           end
       in
@@ -90,7 +73,7 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
         | CastE( _, e) -> match_e e;
         | AddrOf(lv) -> match_lv lv;
         | StartOf(lv) -> match_lv lv;
-        | _ -> E.log "return default false\n";false ;
+        | _ -> false ;
     in
     match_e e
 
@@ -103,7 +86,6 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
       head::(dedup_helper tail)
     in
     varList <- dedup_helper varList;
-    funList <- dedup_helper funList;
 
     (* 
      * input: function name 
@@ -131,7 +113,7 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
           in 
           if self#find_var tmp_v then 
             begin
-              E.log "in arg_count:%s %d\n" tmp_v.vname n; n::(count_helper
+              n::(count_helper
               (tail) (n+1) (result));
               end
          else count_helper (tail)(n+1) result;
@@ -164,7 +146,7 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
     let rec match_e e = 
       let rec match_lv lv = 
         match fst lv with
-        | Var(v) -> v
+        | Var(v) -> E.log "in find_var_in_exp: return varinfo %s\n" v.vname; v
         | Mem(m) -> match_e m
       in
         match e with
@@ -197,22 +179,24 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
   method vinst( i: instr) :instr list visitAction = 
       match i with
        | Set(lv, e, loc) -> 
-           (* E.log "in vinst lv %a e:%a loc: %a\n" d_lval lv d_exp e d_loc loc;
-            * *)
+           E.log "in vinst SET(lv %a e:%a loc: %a\n" d_lval lv d_exp e d_loc loc;
            if self#find_var (self#find_var_in_exp e) || self#find_exp e 
            then 
              (* should push the lval into lvalList *)
-             let helper = 
+             let helper =
                match fst lv with
-               | Var(v) -> self#push_var v;
-               | Mem(m) -> E.log " pushp loc: %a" d_loc loc;self#push_p lv;
+               | Var(v) -> E.log "push var: %s %a\n" v.vname d_loc loc;self#push_var v;
+               | Mem(m) -> self#push_p (snd lv);
              in
              helper;
              DoChildren
-           else 
+           else
+             begin
              DoChildren;
+             end
        | Call( lv, e1, e2, loc) ->
        (* check e2(exp list), if e2 contains lval with sensitive varinfo *)
+           E.log "in vinst CALL(  e:%a loc: %a\n"  d_exp e1 d_loc loc;
            let rec helper t_e2 =
              match t_e2 with
             | [] -> ()
@@ -229,7 +213,6 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
                         match tmp_n_arg with
                         |[] -> ()
                         |n::next -> 
-                            E.log "printing sformals in fun:\n %s\n"
                             fun_var.vname;
                           let rec fun_fd = self#find_fundec_with_name
                           fun_var.vname 
@@ -301,7 +284,7 @@ in
  let vis = new instrVisitor("rsa_st",last_record)
 in 
 ignore(visitCilFile (vis:> cilVisitor) file);
-
+ignore(visitCilFile (vis:> cilVisitor) file);
 (* print out the result *)
 vis#dedup;
 E.log "---------------Begin print varList-------------\n";
@@ -315,4 +298,5 @@ E.log "\n--------------------fun arg ------------\n";
 List.iter (function(e) -> E.log "\n%s %d\n" e.fd.svar.vname e.n_arg)
 last_record.fun_arg_list;
 E.log "\n------------------pointer list------------------\n";
-List.iter (function(p) -> E.log "\n%a\n" d_lval p) vis#get_pList;
+List.iter (function(p) -> match p with Field(f,o) -> E.log "\n%s\n" f.fname | _
+->()) vis#get_pList;
