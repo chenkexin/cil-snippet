@@ -2,6 +2,9 @@
  * $Id: test1.h,v 1.1 2007/07/07 10:52:16 rjones Exp $
  */
 
+/* modified test for openssl
+ * 2014/11/20 chenkx
+ */
 #ifndef __TEST1_H__
 #define __TEST1_H__
 

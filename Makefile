@@ -45,5 +45,5 @@ openssl-files:
 clean: 
 	rm -f *.s *~ *.bak core *.cmi *.cmo *.cmx *.cma *.o *.so *.a *.i ciltest1 ciltest2 test 
 .SUFFIXES: .c .i .cmo .cmi .cmx .ml .mli
-.PHONY: run-ciltest1 clean
+.PHONY: run-ciltest1 run-ciltest2 clean
 

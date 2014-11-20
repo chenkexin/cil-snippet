@@ -2,6 +2,9 @@
  * $Id: test1.c,v 1.2 2007/07/07 12:03:30 rjones Exp $
  */
 
+/* modified test for openssl.
+ * 2014/11/20 Chenkx
+ */
 #include <stdio.h>
 
 #include "test1.h"

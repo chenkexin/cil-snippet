@@ -45,7 +45,7 @@ class visitor( target_vname, target_funcname: string*string) = object(self)
     | _ -> E.log" in vinst._\n"; DoChildren
 
   method vvdec( v: varinfo ): varinfo visitAction = 
-    E.log "in vvdec: %s\n" v.vname;DoChildren
+    E.log "in vvdec: name: %s type:%a \n" v.vname d_type v.vtype ;DoChildren
 
   method vvrbl( v: varinfo): varinfo visitAction = 
     E.log "in vvrbl: %s\n" v.vname;DoChildren

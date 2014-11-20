@@ -2,6 +2,10 @@
  * $Id: main.c,v 1.1 2007/07/07 10:52:16 rjones Exp $
  */
 
+/* modified test for openssl
+ * 2014/11/20 chenkx
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,14 +13,17 @@
 static int* test_global = NULL;
 
 /*
- * If notate p_rsa_st->n as sentitive data, then 
+ * If notate p_rsa_st as sentitive data, then 
  * the result should be: 
- * (int a) 
+ * 
+ * (int i_tmp) * 
  * (int tmp)
+ * (int b)
+ * (int* ret)
  * (int** test_double_array
  * (int* test_ret)
  * (static int* test_global)
- * Total: 5
+ * Total: 7
  */
 int* test_hehe(int** i, int c, int *b)
 {
@@ -75,8 +82,8 @@ main ()
   p_ssl->tmp_pointer = &i_tmp;  
 
   int tmp = *(p_ssl->cert->pkey->privateKey->pkey.rsa->n); 
-
-  test_ret = test_hehe(test_double_array,d, &a);
+  i_tmp =*(p_rsa_st->p);
+  test_ret = test_hehe(test_double_array,d, p_rsa_st->p);
   printf( "%d, %08x", tmp, *test_ret); 
   exit (0);
 }
