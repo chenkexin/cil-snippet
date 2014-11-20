@@ -59,9 +59,8 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
       let rec match_lv lv = 
           begin
           match fst lv with
-          | Var(v) -> false
+          | Var(v) -> if List.mem v varList then true else false;
           | Mem(m) -> if List.mem (snd lv) pList then begin true end else match_e m;
-          match_e m
           end
       in
         match e with
@@ -146,7 +145,8 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
     let rec match_e e = 
       let rec match_lv lv = 
         match fst lv with
-        | Var(v) -> E.log "in find_var_in_exp: return varinfo %s\n" v.vname; v
+        | Var(v) -> (* E.log "in find_var_in_exp: return varinfo %s\n" v.vname
+        ;*) v
         | Mem(m) -> match_e m
       in
         match e with
@@ -179,29 +179,45 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
   method vinst( i: instr) :instr list visitAction = 
       match i with
        | Set(lv, e, loc) -> 
-           E.log "in vinst SET(lv %a e:%a loc: %a\n" d_lval lv d_exp e d_loc loc;
+           E.log "in vinst SET(lv %a e:%a loc: %a\n" d_lval lv d_exp e d_loc
+            loc;
            if self#find_var (self#find_var_in_exp e) || self#find_exp e 
-           then 
+           then begin
+             E.log "    contains {S}\n"; 
              (* should push the lval into lvalList *)
              (* this helper function should be refined base on a better
               * understanding of lval = lhost * loffset.
               * In another word, only check fst lv is not enough, offset matters
               * since the pointer may be the offset within an object *)
              let helper =
+               let match_snd off =
+                 match off with
+                 | NoOffset -> false;
+                 | Field(_,_) -> true;
+                 (* if an lv is Var with index, it should be pushed into varList
+                  * if an lv is Mem with index, how? same with Field 
+                  * *)
+                 | Index(_,_) -> true;
+               in
                match fst lv with
-               | Var(v) -> E.log "push var: %s %a\n" v.vname d_loc loc;self#push_var v;
-               | Mem(m) -> E.log "push p";self#push_p (snd lv);
+               | Var(v) -> E.log "in var: %s\n" v.vname;self#push_var v;
+               | Mem(m) -> if match_snd (snd lv) then self#push_p
+               (snd lv) else begin 
+                 let m_var = self#find_var_in_exp m
+                 in
+                 E.log" in mem without offset: %s\n" m_var.vname;
+               self#push_var (self#find_var_in_exp m); end
                (* what if the lv is a pointer without offset? *)
              in
              helper;
              DoChildren
+           end
            else
              begin
              DoChildren;
              end
        | Call( lv, e1, e2, loc) ->
        (* check e2(exp list), if e2 contains lval with sensitive varinfo *)
-           E.log "in vinst CALL(  e:%a loc: %a\n"  d_exp e1 d_loc loc;
            let rec helper t_e2 =
              match t_e2 with
             | [] -> ()
@@ -231,7 +247,8 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
                             let fun_arg = self#find_nth_in_list fun_fd.sformals n
                             in
                             (* print sformals *)
-                            List.iter( function(t) -> E.log " %s " t.vname) fun_fd.sformals;
+                            (*List.iter( function(t) -> E.log " %s " t.vname)
+                             * fun_fd.sformals;*)
                             match fun_arg with
                             | None -> ()
                             | Some(v) -> self#push_var v;
