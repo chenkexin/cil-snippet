@@ -20,7 +20,9 @@ static int* test_global = NULL;
  *    (int* test_ret) *
  *    (static int* test_global) *
  *    (int* check_pointer ) *
- * Total: 8
+ *    (int** i) *
+ *    add to pointer list: (p_ssl->tmp_pointer) *
+ * Total: 10
  */
 int* test_hehe(int** i, int c, int *b)
 {

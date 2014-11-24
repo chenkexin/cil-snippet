@@ -9,12 +9,16 @@ let files = [ "test1.i"; "main.i" ]
 type fun_arg_list_type = 
   { 
     fd: fundec;
-    n_arg: int
+    n_arg: int list
   }
 type record = 
   {
     (* holds the function declaration which passes sensitive data *)
     mutable funList: fundec list;
+    
+    (* holds the variables which may contains sensitive data *)
+    mutable varList: varinfo list;
+    
     (* holds the function dec which passes sensitive data and if the n-th
      * argument is propagated *)
     mutable fun_arg_list: fun_arg_list_type list;
@@ -36,11 +40,13 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
 
   method get_varList = varList
 
+  method get_fun_arg_list = fun_arg_list
+
   method get_pList = pList
 
-  method push_var (v) = varList <- v::varList
+  method push_var (v) =(*E.log"pushed %s\n" v.vname;*) varList <- v::varList
  
-  method push_fun e = funList <- e::funList; last_record.funList <- funList;
+  method push_fun e = funList <- e::funList; 
 
   method push_fun_arg_list arg_list = fun_arg_list <- arg_list::fun_arg_list;
   last_record.fun_arg_list <- fun_arg_list;
@@ -76,6 +82,43 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
     in
     match_e e
 
+  (* find if a function's fd contains {S} *)
+  (* input: function's e2 list 
+   * output: the int list which contains the index of {S} in e2 list *)
+  method find_s_in_fd( e2: exp list) = 
+    let rec find_helper (e:exp list) (n:int) (result:int list)= 
+      match e with
+      | [] -> (*E.log" find_s_in_fd, length: %d\n"*) (List.length result);result;
+      | head::tail -> if self#find_var ( self#find_var_in_exp head) then
+        find_helper (tail) (n+1) (n::result) else find_helper (tail) (n+1)
+        (result)
+    in
+    find_helper e2 0 [];
+
+    (* push the argument into {S} according to index list of parameters in fd *)
+  (* input: index list(int) of parameters and fd(fundex) of a function
+   * output: unit *)
+  method push_argument( index: int list) (e2: exp list) = 
+    (*E.log "in push_argument \n";*)
+    match index with
+    | [] -> () (* nothing to push *)
+    | head::tail -> let rec find_nth_in_exp exp n =
+      match exp with
+      | []-> () (* nothing to push *)
+      | e_head::e_tail -> if n = 0 then begin (* push var in e_head *) (*E.log
+      "e_head :%a \n" d_exp e_head; *)
+        self#push_var (self#find_var_in_exp e_head) end else find_nth_in_exp
+      e_tail (n-1)
+    in
+    (*E.log "in push_argument: index %d\n" head;*)
+    find_nth_in_exp e2 head;
+
+    (* dedup all lists and save these lists *)
+  method get_result = 
+    last_record.funList <- funList;
+    last_record.varList <- varList;
+    last_record.fun_arg_list <- fun_arg_list;
+
   (* dedup all lists *) 
   method dedup  = 
     let rec dedup_helper tmp_list = 
@@ -85,6 +128,9 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
       head::(dedup_helper tail)
     in
     varList <- dedup_helper varList;
+    funList <- dedup_helper funList;
+    fun_arg_list <- dedup_helper fun_arg_list;
+    pList <- dedup_helper pList;
 
     (* 
      * input: function name 
@@ -106,14 +152,16 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
   method fun_arg_count (arg_list: exp list)  =
     let rec count_helper exp n result= 
       match exp with
-      | [] -> result 
+      | [] -> (*E.log "in fun_arg_count: result length: %d\n" (List.length
+      result);*)result 
       | head::tail ->
           let tmp_v = self#find_var_in_exp( head )
           in 
           if self#find_var tmp_v then 
             begin
-              n::(count_helper
-              (tail) (n+1) (result));
+              (*E.log "var: %s found\n" tmp_v.vname;*)
+              (count_helper
+              (tail) (n+1) (n::result));
               end
          else count_helper (tail)(n+1) result;
     in 
@@ -179,11 +227,11 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
   method vinst( i: instr) :instr list visitAction = 
       match i with
        | Set(lv, e, loc) -> 
-           E.log "in vinst SET(lv %a e:%a loc: %a\n" d_lval lv d_exp e d_loc
-            loc;
+         (*  E.log "in vinst SET(lv %a e:%a loc: %a\n" d_lval lv d_exp e d_loc
+            loc;*)
            if self#find_var (self#find_var_in_exp e) || self#find_exp e 
            then begin
-             E.log "    contains {S}\n"; 
+             (*E.log "    contains {S}\n"; *)
              (* should push the lval into lvalList *)
              (* this helper function should be refined base on a better
               * understanding of lval = lhost * loffset.
@@ -200,12 +248,12 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
                  | Index(_,_) -> true;
                in
                match fst lv with
-               | Var(v) -> E.log "in var: %s\n" v.vname;self#push_var v;
+               | Var(v) ->(* E.log "in var: %s\n" v.vname;*)self#push_var v;
                | Mem(m) -> if match_snd (snd lv) then self#push_p
                (snd lv) else begin 
                  let m_var = self#find_var_in_exp m
                  in
-                 E.log" in mem without offset: %s\n" m_var.vname;
+                 (*E.log" in mem without offset: %s\n" m_var.vname;*)
                self#push_var (self#find_var_in_exp m); end
                (* what if the lv is a pointer without offset? *)
              in
@@ -230,7 +278,7 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
                 then
                   begin
                     (* push fundec*n into fun_arg_list *)  
-                      let rec helper (tmp_n_arg:int list) = 
+                      let rec helper_2 (tmp_n_arg:int list) = 
                         match tmp_n_arg with
                         |[] -> ()
                         |n::next -> 
@@ -242,7 +290,9 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
                           | None -> ()
                           | Some(fun_fd) ->
                             (* 1 *)
-                            self#push_fun_arg_list { fd=fun_fd; n_arg = n };
+                              if List.mem {fd=fun_fd; n_arg=tmp_n_arg }
+                              fun_arg_list then () else self#push_fun_arg_list { fd=fun_fd; n_arg =
+                                tmp_n_arg };
                             (* 2 *)
                             let fun_arg = self#find_nth_in_list fun_fd.sformals n
                             in
@@ -251,27 +301,31 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
                              * fun_fd.sformals;*)
                             match fun_arg with
                             | None -> ()
-                            | Some(v) -> self#push_var v;
-                            helper next;
+                            | Some(v) -> (*E.log " push_var loc: %a\n" d_loc
+                            loc ;*)self#push_var v;
+                            helper_2 next;
                       in 
-                      helper n_arg;
-                      E.log "\n" ;
+                      helper_2 n_arg;
+                      (*E.log "\n";*)
                       (* 3 *)
                       match lv with
                       | None -> ()
-                      | Some(lv) -> self#push_var (self#find_var_in_lval lv);                    
+                      | Some(lv) -> self#push_var (self#find_var_in_lval lv);      
+                      (* 4 *)
+                      (* E.log "***func: %a loc: %a\n" d_exp e1 d_loc loc;*)
+                      self#push_argument n_arg e2;
                   end
                 else helper tail;
            in
            helper e2;
-       DoChildren
+           DoChildren
        | _ -> SkipChildren
 
   method print_func_argument( v_list: varinfo list) =
     let rec helper t_list = 
       match t_list with
-      | [] -> E.log "\n"
-      | head::tail -> E.log "%s " head.vname; helper tail;
+      | [] -> (*E.log "\n"*)()
+      | head::tail -> (*E.log "%s " head.vname;*) helper tail;
     in
     helper v_list
 
@@ -293,7 +347,7 @@ end
 
 
 (* construct CIL data structure *)
-let () =  (* let files = input_file "openssl-files" in *)
+let () =  (*let files = input_file "openssl-files" in *)
  let  files = List.map( fun filename -> let f = Frontc.parse filename in
 f() ) files in let file = Mergecil.merge files "test" in
 Rmtmps.removeUnusedTemps file;
@@ -301,23 +355,25 @@ Rmtmps.removeUnusedTemps file;
 Cfg.computeFileCFG file;
 
 (* do the AST analysis *)
-  let last_record = {funList=[]; fun_arg_list=[]}
+  let last_record = {funList=[]; fun_arg_list=[]; varList=[]}
 in
  let vis = new instrVisitor("rsa_st",last_record)
-in 
+in
 ignore(visitCilFile (vis:> cilVisitor) file);
-ignore(visitCilFile (vis:> cilVisitor) file);
+vis#get_result;
+while Util.equals last_record.varList vis#get_varList 
+do 
+  vis#get_result;
+  ignore(visitCilFile (vis:> cilVisitor) file);
+  vis#dedup;
+done;
+
 (* print out the result *)
-vis#dedup;
 E.log "---------------Begin print varList-------------\n";
 List.iter (function(head) -> E.log "%s:%a \n" head.vname d_loc head.vdecl) 
 vis#get_varList;
-E.log "\n--------------------fun list ----------\n";
-List.iter (function(head) -> E.log "function name : %s\n" head.svar.vname)
-last_record.funList;
 E.log "\n--------------------fun arg ------------\n";
-
-List.iter (function(e) -> E.log "\n%s %d\n" e.fd.svar.vname e.n_arg)
+List.iter (function(e) -> E.log "\n%s \n" e.fd.svar.vname )
 last_record.fun_arg_list;
 E.log "\n------------------pointer list------------------\n";
 List.iter (function(p) -> match p with Field(f,o) -> E.log "\n%s\n" f.fname | _
