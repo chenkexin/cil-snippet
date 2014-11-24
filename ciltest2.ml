@@ -95,23 +95,18 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
     in
     find_helper e2 0 [];
 
-    (* push the argument into {S} according to index list of parameters in fd *)
+    (* push the argument into {S} according to fd *)
   (* input: index list(int) of parameters and fd(fundex) of a function
    * output: unit *)
-  method push_argument( index: int list) (e2: exp list) = 
+  method push_argument( fd: fundec) (e2: exp list) = 
     (*E.log "in push_argument \n";*)
-    match index with
+    let rec helper n v_list =
+    match v_list with
     | [] -> () (* nothing to push *)
-    | head::tail -> let rec find_nth_in_exp exp n =
-      match exp with
-      | []-> () (* nothing to push *)
-      | e_head::e_tail -> if n = 0 then begin (* push var in e_head *) (*E.log
-      "e_head :%a \n" d_exp e_head; *)
-        self#push_var (self#find_var_in_exp e_head) end else find_nth_in_exp
-      e_tail (n-1)
+    | head::tail -> if self#find_var head then begin self#push_var
+    (self#find_var_in_exp (List.nth e2 n) ) end else helper (n+1) (tail)
     in
-    (*E.log "in push_argument: index %d\n" head;*)
-    find_nth_in_exp e2 head;
+    helper 0 fd.sformals;
 
     (* dedup all lists and save these lists *)
   method get_result = 
@@ -289,6 +284,8 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
                           match fun_fd with
                           | None -> ()
                           | Some(fun_fd) ->
+                            (* 4 *)
+                              self#push_argument fun_fd e2;
                             (* 1 *)
                               if List.mem {fd=fun_fd; n_arg=tmp_n_arg }
                               fun_arg_list then () else self#push_fun_arg_list { fd=fun_fd; n_arg =
@@ -296,9 +293,6 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
                             (* 2 *)
                             let fun_arg = self#find_nth_in_list fun_fd.sformals n
                             in
-                            (* print sformals *)
-                            (*List.iter( function(t) -> E.log " %s " t.vname)
-                             * fun_fd.sformals;*)
                             match fun_arg with
                             | None -> ()
                             | Some(v) -> (*E.log " push_var loc: %a\n" d_loc
@@ -306,14 +300,10 @@ class instrVisitor (class_type,last_record :string*record)= object (self)
                             helper_2 next;
                       in 
                       helper_2 n_arg;
-                      (*E.log "\n";*)
                       (* 3 *)
                       match lv with
                       | None -> ()
                       | Some(lv) -> self#push_var (self#find_var_in_lval lv);      
-                      (* 4 *)
-                      (* E.log "***func: %a loc: %a\n" d_exp e1 d_loc loc;*)
-                      self#push_argument n_arg e2;
                   end
                 else helper tail;
            in
@@ -347,7 +337,7 @@ end
 
 
 (* construct CIL data structure *)
-let () =  let files = input_file "openssl-files" in 
+let () =(*  let files = input_file "openssl-files" in *)
  let  files = List.map( fun filename -> let f = Frontc.parse filename in
 f() ) files in let file = Mergecil.merge files "test" in
 Rmtmps.removeUnusedTemps file;
@@ -363,8 +353,8 @@ in
 ignore(visitCilFile (vis:> cilVisitor) file);
 vis#dedup;
 vis#get_result;
-while (List.length last_record.varList <> List.length last_record2.varList)
-&&(List.length last_record.fun_arg_list <> List.length last_record2.fun_arg_list) 
+while (List.length last_record.varList != List.length last_record2.varList)
+&&(List.length last_record.fun_arg_list != List.length last_record2.fun_arg_list) 
 do
   last_record2.fun_arg_list <- last_record.fun_arg_list;
   last_record2.varList <- last_record.varList; 
