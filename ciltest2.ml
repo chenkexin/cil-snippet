@@ -347,7 +347,7 @@ end
 
 
 (* construct CIL data structure *)
-let () =  (*let files = input_file "openssl-files" in *)
+let () =  let files = input_file "openssl-files" in 
  let  files = List.map( fun filename -> let f = Frontc.parse filename in
 f() ) files in let file = Mergecil.merge files "test" in
 Rmtmps.removeUnusedTemps file;
@@ -355,17 +355,22 @@ Rmtmps.removeUnusedTemps file;
 Cfg.computeFileCFG file;
 
 (* do the AST analysis *)
-  let last_record = {funList=[]; fun_arg_list=[]; varList=[]}
+  let last_record = {funList=[]; fun_arg_list=[]; varList=[]} and last_record2 =
+    {funList=[]; fun_arg_list=[]; varList=[]}
 in
  let vis = new instrVisitor("rsa_st",last_record)
 in
 ignore(visitCilFile (vis:> cilVisitor) file);
+vis#dedup;
 vis#get_result;
-while Util.equals last_record.varList vis#get_varList 
-do 
-  vis#get_result;
+while (List.length last_record.varList <> List.length last_record2.varList)
+&&(List.length last_record.fun_arg_list <> List.length last_record2.fun_arg_list) 
+do
+  last_record2.fun_arg_list <- last_record.fun_arg_list;
+  last_record2.varList <- last_record.varList; 
   ignore(visitCilFile (vis:> cilVisitor) file);
   vis#dedup;
+  vis#get_result;
 done;
 
 (* print out the result *)
