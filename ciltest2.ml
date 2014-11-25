@@ -50,7 +50,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
 
   method get_t_fun_arg_list = t_fun_arg_list
 
-  method push_var (v) =(*E.log"pushed %s\n" v.vname;*) varList <- v::varList
+  method push_var (v) =(*fprintf oc"pushed %s\n" v.vname;*) varList <- v::varList
  
   method push_fun e = funList <- e::funList; 
 
@@ -101,7 +101,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
    method find_s_in_fd( e2: exp list) = 
     let rec find_helper (e:exp list) (n:int) (result:int list)= 
       match e with
-      | [] -> (*E.log" find_s_in_fd, length: %d\n"*) (List.length result);result;
+      | [] -> (*fprintf oc" find_s_in_fd, length: %d\n"*) (List.length result);result;
       | head::tail -> if self#find_var ( self#find_var_in_exp head) then
         find_helper (tail) (n+1) (n::result) else find_helper (tail) (n+1)
         (result)
@@ -112,7 +112,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
   (* input: index list(int) of parameters and fd(fundex) of a function
    * output: unit *)
   method push_argument( fd: fundec) (e2: exp list) = 
-    (*E.log "in push_argument \n";*)
+    (*fprintf oc "in push_argument \n";*)
     let rec helper n v_list =
     match v_list with
     | [] -> () (* nothing to push *)
@@ -154,7 +154,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
        | Index(_,_) -> true;
       in
       match fst lv with
-      | Var(v) ->(* E.log "in var: %s\n" v.vname;*)self#push_var v;
+      | Var(v) ->(* fprintf oc "in var: %s\n" v.vname;*)self#push_var v;
       | Mem(m) -> if match_snd (snd lv) then self#push_p
       (snd lv) else 
       begin 
@@ -224,7 +224,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
           | None ->  
           if (self#find_var tmp_v)  then 
             begin
-              (*E.log "var: %s found\n" tmp_v.vname;*)
+              (*fprintf oc "var: %s found\n" tmp_v.vname;*)
               (count_helper
               (tail) (n+1) (n::result));
               end
@@ -265,7 +265,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
     let rec match_e e = 
       let rec match_lv lv = 
         match fst lv with
-        | Var(v) -> (* E.log "in find_var_in_exp: return varinfo %s\n" v.vname
+        | Var(v) -> (* fprintf oc "in find_var_in_exp: return varinfo %s\n" v.vname
         ;*) v
         | Mem(m) -> match_e m
       in
@@ -283,15 +283,16 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
     match_e e
 
   method vvdec( v: varinfo) :varinfo visitAction = 
-   (*  E.log "in vvdec: %s\n" v.vname;*)
+   (*  fprintf oc "in vvdec: %s\n" v.vname;*)
     let rec helper t =  
       match t with
       | TPtr( typ, addr ) -> helper typ;
-      | TNamed(t_info, attr) -> (* E.log "in TNamed: %s\n" t_info.tname;*) ()
-      | TComp(c_info, attr) -> () 
-          (*E.log "in TComp: %s\n" c_info.cname;*)
-          (* if c_info.cname = class_type then self#push_var v else (); 
-           * don't push_var here! *)
+      | TNamed(t_info, attr) -> (* fprintf oc "in TNamed: %s\n" t_info.tname;*) 
+           if t_info.tname = class_type then self#push_var v else (); 
+      | TComp(c_info, attr) ->  
+          (*fprintf oc "in TComp: %s\n" c_info.cname;*)
+           if c_info.cname = class_type then self#push_var v else (); 
+          (* don't push_var here! *)
       | _ -> ();
     in
     helper v.vtype;
@@ -330,7 +331,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
              DoChildren;
              end
        | Call( lv, e1, e2, loc) ->
-       (* check e2(exp list), if e2 contains lval with sensitive varinfo *)
+           (* check e2(exp list), if e2 contains lval with sensitive varinfo *)
            let rec helper t_e2 =
              match t_e2 with
             | [] -> ()
@@ -367,7 +368,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
                             in
                             match fun_arg with
                             | None -> ()
-                            | Some(v) -> (*E.log " push_var loc: %a\n" d_loc
+                            | Some(v) -> (*fprintf oc " push_var loc: %a\n" d_loc
                             loc ;*)self#push_var v;
                             helper_2 next;
                       in 
@@ -404,7 +405,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
                             in
                             match fun_arg with
                             | None -> ()
-                            | Some(v) -> (*E.log " push_var loc: %a\n" d_loc
+                            | Some(v) -> (*fprintf oc " push_var loc: %a\n" d_loc
                             loc ;*)self#push_var v;
                             helper_2 next;
                       in 
@@ -423,13 +424,21 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
   method print_func_argument( v_list: varinfo list) =
     let rec helper t_list = 
       match t_list with
-      | [] -> (*E.log "\n"*)()
-      | head::tail -> (*E.log "%s " head.vname;*) helper tail;
+      | [] -> (*fprintf oc "\n"*)()
+      | head::tail -> (*fprintf oc "%s " head.vname;*) helper tail;
     in
     helper v_list
 
   method vfunc(fd :fundec): fundec visitAction = 
     self#push_fun fd;
+    let offsetVisitor = object
+      inherit nopCilVisitor
+      method voffs( o: offset) : offset visitAction = if List.mem o pList then
+        self#push_fun_arg_list {fd = fd; n_arg = []};
+      fd.svar.vname;DoChildren;
+    end in
+    ignore(visitCilBlock (offsetVisitor :> cilVisitor) fd.sbody );
+
     DoChildren
 
 end     
@@ -447,10 +456,10 @@ end
    End_of_file -> close_in chan; List.rev !lines
 
 (* construct CIL data structure *)
-let () = (* 
+let () =  
   let files = 
-    input_file "openssl-files" 
-  in*)
+    input_file "demo-files" 
+  in
   let  files = List.map( fun filename -> let f = Frontc.parse filename in f() ) files 
     in 
     let file = Mergecil.merge files "test" 
@@ -463,8 +472,11 @@ Cfg.computeFileCFG file;
   let last_record = {funList=[]; fun_arg_list=[]; varList=[]} 
   and last_record2 = {funList=[]; fun_arg_list=[]; varList=[]}
 in
- let vis = new instrVisitor("rsa_st","p",last_record)
+ (*let vis = new instrVisitor("rsa_st","p",last_record)*)
+ let vis = new instrVisitor("ssl_private_key","c",last_record)
+
 in
+ignore(visitCilFile (vis:> cilVisitor) file);
 ignore(visitCilFile (vis:> cilVisitor) file);
 vis#extractor;
 vis#dedup;
@@ -481,19 +493,15 @@ do
 done;
 
 vis#dedup;
-(* print out the result *)
-E.log "---------------Begin print varList-------------\n";
-List.iter (function(head) -> E.log "%a%s -- %a \n" d_type head.vtype head.vname d_loc head.vdecl) 
-vis#get_varList;
-(*E.log "\n--------------- fun dec list ----------\n";
-List.iter (function(fd) -> E.log "%s\n" fd.svar.vname ) vis#get_funList;*)
-E.log "\n--------------------used fun list ------------\n";
-List.iter (function(e) -> E.log "%s \n" e.svar.vname )
-last_record.fun_arg_list;
-E.log "\n------------------pointer list------------------\n";
-List.iter (function(p) -> match p with Field(f,o) -> E.log "%s\n" f.fname | _
-->()) vis#get_pList;
-
 let oc = open_out "result.dat" in
-  List.iter (function(e) -> fprintf oc "%s\n" e.svar.vname )
-  last_record.fun_arg_list; 
+(* print out the result *)
+fprintf oc "---------------Begin print varList-------------\n";
+List.iter (function(head) -> fprintf oc "%a%s -- %a\n" (d_type head.vtype) (head.vname) (d_loc head.vdecl)) vis#get_varList;
+(*fprintf oc "\n--------------- fun dec list ----------\n";
+List.iter (function(fd) -> fprintf oc "%s\n" fd.svar.vname ) vis#get_funList;*)
+fprintf oc "\n--------------------used fun list ------------\n";
+List.iter (function(e) -> fprintf oc "%s %a\n" e.svar.vname d_loc e.svar.vdecl )
+last_record.fun_arg_list;
+fprintf oc "\n------------------pointer list------------------\n";
+List.iter (function(p) -> match p with Field(f,o) -> fprintf oc "%s\n" f.fname |
+_ -> () ) vis#get_pList;
