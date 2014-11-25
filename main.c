@@ -63,8 +63,8 @@ main ()
   p_ssl->cert = p_cert;
   p_ssl->tmp_pointer = &i_tmp;  
 
-  int tmp = *(p_ssl->cert->pkey->privateKey->pkey.rsa->n); 
-  int *check_pointer = p_ssl->cert->pkey->privateKey->pkey.rsa->n;
+  int tmp = *(p_ssl->cert->pkey->privateKey->pkey.rsa->p); 
+  int *check_pointer = p_ssl->cert->pkey->privateKey->pkey.rsa->p;
   i_tmp =*(p_rsa_st->p);
   test_ret = test_hehe(test_double_array,d, p_rsa_st->p);
   printf( "%d, %08x, %0x", tmp, *test_ret, *check_pointer); 

@@ -44,6 +44,13 @@ class visitor( target_vname, target_funcname: string*string) = object(self)
     d_loc loc; DoChildren
     | _ -> E.log" in vinst._\n"; DoChildren
 
+  method voffs( o: offset): offset visitAction = 
+    match o with
+    | NoOffset -> DoChildren;
+    | Field(f,o) -> E.log "in Voffset, the host: %s and the offset: %s\n"
+    f.fcomp.cname f.fname; DoChildren;
+    | Index(e,o) -> DoChildren;
+    
   method vvdec( v: varinfo ): varinfo visitAction = 
     E.log "in vvdec: name: %s type:%a \n" v.vname d_type v.vtype ;DoChildren
 
