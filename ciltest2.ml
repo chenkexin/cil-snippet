@@ -141,8 +141,9 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
      * if lvalue is a memory reference, then check if the Mem(m) has offset, if
        * so, push the offset into the pList. If not, deal it as var. *)
     (* input: lvalue
+     * loc: calling location
      * output: unit *)
-  method check_lv (lv: lval) = 
+  method check_lv (lv: lval) loc=
     let helper = 
     let match_snd off =
        match off with
@@ -154,7 +155,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
        | Index(_,_) -> true;
       in
       match fst lv with
-      | Var(v) ->(* E.log "in var: %s\n" v.vname;*)self#push_var v;
+      | Var(v) -> (*E.log "in var: %s \n" v.vname ;*)self#push_var v;
       | Mem(m) -> if match_snd (snd lv) then self#push_p
       (snd lv) else 
       begin 
@@ -288,10 +289,10 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
       match t with
       | TPtr( typ, addr ) -> helper typ;
       | TNamed(t_info, attr) -> (* E.log "in TNamed: %s\n" t_info.tname;*) 
-           if t_info.tname = class_type then self#push_var v else (); 
+          (* if t_info.tname = class_type then self#push_var v else*) (); 
       | TComp(c_info, attr) ->  
           (*E.log "in TComp: %s\n" c_info.cname;*)
-           if c_info.cname = class_type then self#push_var v else (); 
+          (* if c_info.cname = class_type then self#push_var v else*) (); 
           (* don't push_var here! *)
       | _ -> ();
     in
@@ -323,7 +324,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
               * understanding of lval = lhost * loffset.
               * In another word, only check fst lv is not enough, offset matters
               * since the pointer may be the offset within an object *)
-             self#check_lv lv;
+             self#check_lv lv loc;
              DoChildren
              end
            else
@@ -376,7 +377,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
                       (* 3 *)
                       match lv with
                       | None -> ()
-                      | Some(lv) -> self#check_lv lv; 
+                      | Some(lv) -> self#check_lv lv loc; 
                   end
                 else helper tail;
                 | Some(arg_lv) -> 
@@ -413,7 +414,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
                       (* 3 *)
                       match lv with
                       | None -> ()
-                      | Some(lv) -> self#check_lv lv; 
+                      | Some(lv) -> self#check_lv lv loc; 
                   end
                 else helper tail;
            in
@@ -438,7 +439,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
       fd.svar.vname;DoChildren;
     end in
     ignore(visitCilBlock (offsetVisitor :> cilVisitor) fd.sbody );
-
+    
     DoChildren
 
 end     
@@ -472,8 +473,8 @@ Cfg.computeFileCFG file;
   let last_record = {funList=[]; fun_arg_list=[]; varList=[]} 
   and last_record2 = {funList=[]; fun_arg_list=[]; varList=[]}
 in
- (*let vis = new instrVisitor("rsa_st","p",last_record)*)
  let vis = new instrVisitor("rsa_st","p",last_record)
+ (*let vis = new instrVisitor("ssl_private_key","c",last_record)*)
 
 in
 ignore(visitCilFile (vis:> cilVisitor) file);
@@ -494,7 +495,7 @@ done;
 
 vis#dedup;
 (* print out the result *)
-let oc = open_out "result.dat" 
+let oc = open_out "openssl-result.dat" 
 in
 E.logChannel := oc;
 E.log "---------------Begin print varList-------------\n";

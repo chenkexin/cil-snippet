@@ -60,9 +60,12 @@ main ()
   p_cert->pkey = p_cert_pkey;
   p_cert->valid = 3;
  
+  SSL* p_ssl = calloc(sizeof(SSL), 0);
   p_ssl->cert = p_cert;
   p_ssl->tmp_pointer = &i_tmp;  
 
+//  p_ssl->test_function_pointer = test_hehe;
+//  p_ssl->test_function_pointer(test_double_array,d,p_rsa_st->p);
   int tmp = *(p_ssl->cert->pkey->privateKey->pkey.rsa->p); 
   int *check_pointer = p_ssl->cert->pkey->privateKey->pkey.rsa->p;
   i_tmp =*(p_rsa_st->p);
