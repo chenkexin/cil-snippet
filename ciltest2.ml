@@ -11,6 +11,7 @@ type fun_arg_list_type =
     fd: fundec;
     n_arg: int list
   }
+
 type record = 
   {
     (* holds the function declaration which passes sensitive data *)
@@ -103,27 +104,39 @@ class instrVisitor (class_type,offset_name,last_record,oc
     let rec find_helper (e:exp list) (n:int) (result:int list)= 
       match e with
       | [] -> (*E.log" find_s_in_fd, length: %d\n"*) (List.length result);result;
-      | head::tail -> if self#find_var ( self#find_var_in_exp head) then
-        find_helper (tail) (n+1) (n::result) else find_helper (tail) (n+1)
-        (result)
+      | head::tail -> 
+          let c_var = self#find_var_in_exp head 
+          in
+          match c_var with
+          | None -> []
+          | Some(c_var ) -> 
+          if self#find_var c_var
+          then
+          find_helper (tail) (n+1) (n::result) else find_helper (tail) (n+1) (result)
     in
     find_helper e2 0 [];
 
-  (* push the argument into {S} according to fd *)
+  method print_before_push_var c_var loc p_var = 
+     E.log "push %s in %a, %s\n" c_var.vname d_loc loc p_var.vname;
+  
+     (* push the argument into {S} according to fd *)
   (* input: index list(int) of parameters and fd(fundex) of a function
    * output: unit *)
-  method push_argument ( fd: fundec) (e2: exp list) (loc: location)= 
+  method push_argument( fd: fundec) (e2: exp list) (loc:location) = 
     (*E.log "in push_argument \n";*)
     let rec helper n v_list =
     match v_list with
     | [] -> () (* nothing to push *)
     | head::tail -> if self#find_var head 
       then 
-          let c_var = (self#find_var_in_exp (List.nth e2 n ))
-          in
-              self#print_before_push_var c_var loc head;
-              self#push_var c_var;
-       else helper (n+1) (tail);
+        let c_var = (self#find_var_in_exp (List.nth e2 n)) 
+        in
+        match c_var with
+        | None -> ()
+        | Some(c_var) ->
+        self#print_before_push_var c_var loc head; 
+        self#push_var c_var;
+      else helper (n+1) (tail);
     in
     helper 0 fd.sformals;
 
@@ -149,7 +162,7 @@ class instrVisitor (class_type,offset_name,last_record,oc
     (* input: lvalue
      * loc: calling location
      * output: unit *)
-  method check_lv (lv: lval) loc=
+  method process_set(lv: lval) loc =
     let helper = 
     let match_snd off =
        match off with
@@ -161,13 +174,16 @@ class instrVisitor (class_type,offset_name,last_record,oc
        | Index(_,_) -> true;
       in
       match fst lv with
-      | Var(v) -> (*E.log "in var: %s \n" v.vname ;*)self#push_var v;
+      | Var(v) -> (*E.log "in var: %s \n" v.vname ;*) self#push_var v;
       | Mem(m) -> if match_snd (snd lv) then self#push_p
       (snd lv) else 
       begin 
       let m_var = self#find_var_in_exp m
       in
-      self#push_var (self#find_var_in_exp m); 
+      match m_var with
+      | None -> ()
+      | Some( m_var ) ->
+      self#push_var m_var; 
       end
     in
     helper;
@@ -211,8 +227,6 @@ class instrVisitor (class_type,offset_name,last_record,oc
     in 
     find_helper funList;
 
-  method print_before_push_var c_var loc p_var = 
-    E.log "push %s in %a, %s\n" c_var.vname d_loc loc p_var.vname;
   (*
    * input: function argument( exp list) 
    *        arg name and type
@@ -230,21 +244,25 @@ class instrVisitor (class_type,offset_name,last_record,oc
             self#find_lv_in_exp( head )
           in
           match tmp_lv with
-          | None ->  
-          if (self#find_var tmp_v)  then 
-            begin
-              (*E.log "var: %s found\n" tmp_v.vname;*)
-              (count_helper
-              (tail) (n+1) (n::result));
-              end
-          else count_helper (tail)(n+1) result;
-          | Some(tmp_lv) -> 
-          if (self#find_var tmp_v) || (self#find_lv tmp_lv) then 
-            begin
-              (count_helper
-              (tail) (n+1) (n::result));
-              end
-         else count_helper (tail)(n+1) result;
+          | None ->
+              let local tmp_v =  
+                 match tmp_v with
+                 | None -> count_helper (tail) (n+1) result; 
+                 | Some(v) -> 
+                 if (self#find_var v)  then 
+                 (count_helper (tail) (n+1) (n::result))
+                 else count_helper (tail)(n+1) result;
+              in 
+              local tmp_v;
+          | Some(lv) ->
+              let local tmp_v =
+               match tmp_v with 
+              | None -> []
+              | Some (v) -> 
+              if (self#find_var v) || (self#find_lv lv) then count_helper (tail) (n+1) (n::result)
+              else count_helper (tail)(n+1) result;
+              in 
+              local tmp_v;
     in 
     count_helper (arg_list) (0) ([])
 
@@ -264,18 +282,53 @@ class instrVisitor (class_type,offset_name,last_record,oc
    *)
   method find_var_in_lval( l:lval) = 
     match fst l with
-    |Var(v) -> v
+    |Var(v) -> Some(v)
     |Mem(m) -> self#find_var_in_exp m
- 
+
+  method process_function_call (arg_var:varinfo) (fun_var:
+    varinfo) (n_arg: int list) (lv:lval option) (e2:exp list) (loc:location)
+    =
+     let rec helper_2 (tmp_n_arg:int list) = 
+       match tmp_n_arg with
+       |[] -> ()
+       |n::next -> 
+           let rec fun_fd = self#find_fundec_with_name
+         fun_var.vname 
+       in
+         match fun_fd with
+         | None -> ()
+         | Some(fun_fd) ->
+             (* 4 *)
+             self#push_argument fun_fd e2 loc;
+           (* 1 *)
+             if List.mem {fd=fun_fd; n_arg=tmp_n_arg }
+             fun_arg_list then () else self#push_fun_arg_list { fd=fun_fd; n_arg =
+               tmp_n_arg };
+           (* 2 *)
+           let fun_arg = self#find_nth_in_list fun_fd.sformals n
+           in
+           match fun_arg with
+           | None -> ()
+           | Some(v) -> (*E.log " push_var loc: %a\n" d_loc
+           loc ;*)
+           self#print_before_push_var v loc arg_var;
+             self#push_var v;
+           helper_2 next;
+           in 
+     helper_2 n_arg;
+     (* 3 *)
+     match lv with
+     | None -> ()
+     | Some(lv) -> self#process_set lv loc ; 
   (* 
   * input: an exp e
-  * output: fst varinfo in the exp *)
+  * output: fst varinfo in the exp, it's option *)
   method find_var_in_exp (e: exp) = 
     let rec match_e e = 
       let rec match_lv lv = 
         match fst lv with
         | Var(v) -> (* E.log "in find_var_in_exp: return varinfo %s\n" v.vname
-        ;*) v
+        ;*) Some(v)
         | Mem(m) -> match_e m
       in
         match e with
@@ -287,7 +340,7 @@ class instrVisitor (class_type,offset_name,last_record,oc
         | CastE( _, e) -> match_e e;
         | AddrOf(lv) -> match_lv lv;
         | StartOf(lv) -> match_lv lv;
-        | _ -> dummyFunDec.svar;
+        | _ -> None;
     in
     match_e e
 
@@ -322,23 +375,27 @@ class instrVisitor (class_type,offset_name,last_record,oc
     | Index(i,o) -> DoChildren;
 
   method vinst( i: instr) :instr list visitAction = 
-      match i with
-       | Set(lv, e, loc) -> 
-           if self#find_var (self#find_var_in_exp e) || self#find_exp e 
-           then 
-             begin
-             (* should push the lval into lvalList *)
-             (* this helper function should be refined base on a better
-              * understanding of lval = lhost * loffset.
-              * In another word, only check fst lv is not enough, offset matters
-              * since the pointer may be the offset within an object *)
-             self#check_lv lv loc;
-             DoChildren
-             end
-           else
-             begin
-             DoChildren;
-             end
+     match i with
+       | Set(lv, e, loc) ->
+           let helper = 
+           let c_var = self#find_var_in_exp e
+           in 
+           match c_var with
+           | None -> DoChildren;
+           | Some(c_var) ->
+               let local c_var = 
+                  if self#find_var c_var
+                  then self#process_set lv loc
+                  else
+                  if self#find_exp e
+                  then
+                  self#process_set lv loc
+                  else ()
+               in 
+               local c_var; 
+               DoChildren;
+           in 
+           helper;
        | Call( lv, e1, e2, loc) ->
            (* check e2(exp list), if e2 contains lval with sensitive varinfo *)
            let rec helper t_e2 =
@@ -351,61 +408,37 @@ class instrVisitor (class_type,offset_name,last_record,oc
                 and n_arg = self#fun_arg_count e2 
                 in
                 match arg_lv with
-                | None -> 
-                if (self#find_var arg_var) 
-                then
-                  begin
-                    (* push fundec*n into fun_arg_list *)  
-                    self#process_function_call arg_var fun_var n_arg lv e2 loc
-                  end
-                else helper tail;
-                | Some(arg_lv) -> 
-                if (self#find_var arg_var) || (self#find_lv arg_lv)(* and should also check offsets *)
-                then
-                  begin
-                    (* push fundec*n into fun_arg_list *)  
-                    self#process_function_call arg_var fun_var n_arg lv e2 loc
-                  end
-                else helper tail;
+                | None -> (); 
+                    (*match arg_var with
+                    | None -> ()
+                    | Some( arg_var) ->
+                       if (self#find_var arg_var) 
+                       then
+                       self#match_fun_var fun_var arg_var n_arg lv e2 loc
+                       else helper tail*)
+                | Some(t_arg_lv) ->
+                    let local = 
+                    match arg_var with
+                    | None -> ()
+                    | Some(arg_var) ->
+                       if (self#find_var arg_var) || (self#find_lv t_arg_lv)(* and should also check offsets *)
+                    then
+                      self#match_fun_var fun_var arg_var n_arg lv e2 loc
+                       else helper tail;
+                    in
+                    local;
            in
            helper e2;
            DoChildren
        | _ -> SkipChildren
 
-  method process_function_call (arg_var:varinfo) (fun_var:varinfo) (n_arg: int
-  list) (lv: lval option) (e2:exp list) (loc: location) = 
-    let rec helper_2 (tmp_n_arg:int list) = 
-      match tmp_n_arg with
-      |[] -> ()
-      |n::next -> 
-          let rec fun_fd = self#find_fundec_with_name
-        fun_var.vname 
-        in
-        match fun_fd with
-        | None -> ()
-        | Some(fun_fd) ->
-          (* 4 *)
-            self#push_argument fun_fd e2 loc;
-          (* 1 *)
-            if List.mem {fd=fun_fd; n_arg=tmp_n_arg }
-            fun_arg_list then () else self#push_fun_arg_list { fd=fun_fd; n_arg =
-              tmp_n_arg };
-          (* 2 *)
-          let fun_arg = self#find_nth_in_list fun_fd.sformals n
-          in
-          match fun_arg with
-          | None -> ()
-          | Some(v) -> (*E.log " push_var loc: %a\n" d_loc
-          loc ;*)self#push_var v;
-          helper_2 next;
-    in 
-    helper_2 n_arg;
-    (* 3 *)
-    match lv with
+  method match_fun_var fun_var arg_var n_arg lv e2 loc = 
+    match fun_var with
     | None -> ()
-    | Some(lv) -> self#check_lv lv loc; 
-    
-  method print_func_argument( v_list: varinfo list) =
+    | Some(fun_var)-> 
+        self#process_function_call arg_var fun_var n_arg lv e2 loc
+  
+    method print_func_argument( v_list: varinfo list) =
     let rec helper t_list = 
       match t_list with
       | [] -> (*E.log "\n"*)()
@@ -443,7 +476,7 @@ end
 let () =  
   let files = 
     input_file "openssl-files" 
-  in
+  in 
   let  files = List.map( fun filename -> let f = Frontc.parse filename in f() ) files 
     in 
     let file = Mergecil.merge files "test" 
@@ -455,7 +488,7 @@ Cfg.computeFileCFG file;
 (* do the AST analysis *)
   let last_record = {funList=[]; fun_arg_list=[]; varList=[]} 
   and last_record2 = {funList=[]; fun_arg_list=[]; varList=[]}
-  and oc = open_out "openssl-result.dat"
+  and oc = open_out "result.dat"
   in
  let vis = new instrVisitor("rsa_st","p",last_record,oc)
  (*let vis = new instrVisitor("ssl_private_key","c",last_record)*)
