@@ -24,7 +24,8 @@ type record =
     mutable fun_arg_list: fundec list;
   }
   
-class instrVisitor (class_type,offset_name,last_record :string*string*record)= object (self)
+class instrVisitor (class_type,offset_name,last_record,oc
+:string*string*record*out_channel)= object (self)
   inherit nopCilVisitor
   
   (* the list holding possible variables *)
@@ -111,13 +112,18 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
   (* push the argument into {S} according to fd *)
   (* input: index list(int) of parameters and fd(fundex) of a function
    * output: unit *)
-  method push_argument( fd: fundec) (e2: exp list) = 
+  method push_argument ( fd: fundec) (e2: exp list) (loc: location)= 
     (*E.log "in push_argument \n";*)
     let rec helper n v_list =
     match v_list with
     | [] -> () (* nothing to push *)
-    | head::tail -> if self#find_var head then begin self#push_var
-    (self#find_var_in_exp (List.nth e2 n) ) end else helper (n+1) (tail)
+    | head::tail -> if self#find_var head 
+      then 
+          let c_var = (self#find_var_in_exp (List.nth e2 n ))
+          in
+              self#print_before_push_var c_var loc head;
+              self#push_var c_var;
+       else helper (n+1) (tail);
     in
     helper 0 fd.sformals;
 
@@ -205,6 +211,8 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
     in 
     find_helper funList;
 
+  method print_before_push_var c_var loc p_var = 
+    E.log "push %s in %a, %s\n" c_var.vname d_loc loc p_var.vname;
   (*
    * input: function argument( exp list) 
    *        arg name and type
@@ -348,36 +356,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
                 then
                   begin
                     (* push fundec*n into fun_arg_list *)  
-                      let rec helper_2 (tmp_n_arg:int list) = 
-                        match tmp_n_arg with
-                        |[] -> ()
-                        |n::next -> 
-                            let rec fun_fd = self#find_fundec_with_name
-                          fun_var.vname 
-                          in
-                          match fun_fd with
-                          | None -> ()
-                          | Some(fun_fd) ->
-                            (* 4 *)
-                              self#push_argument fun_fd e2;
-                            (* 1 *)
-                              if List.mem {fd=fun_fd; n_arg=tmp_n_arg }
-                              fun_arg_list then () else self#push_fun_arg_list { fd=fun_fd; n_arg =
-                                tmp_n_arg };
-                            (* 2 *)
-                            let fun_arg = self#find_nth_in_list fun_fd.sformals n
-                            in
-                            match fun_arg with
-                            | None -> ()
-                            | Some(v) -> (*E.log " push_var loc: %a\n" d_loc
-                            loc ;*)self#push_var v;
-                            helper_2 next;
-                      in 
-                      helper_2 n_arg;
-                      (* 3 *)
-                      match lv with
-                      | None -> ()
-                      | Some(lv) -> self#check_lv lv loc; 
+                    self#process_function_call arg_var fun_var n_arg lv e2 loc
                   end
                 else helper tail;
                 | Some(arg_lv) -> 
@@ -385,36 +364,7 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
                 then
                   begin
                     (* push fundec*n into fun_arg_list *)  
-                      let rec helper_2 (tmp_n_arg:int list) = 
-                        match tmp_n_arg with
-                        |[] -> ()
-                        |n::next -> 
-                            let rec fun_fd = self#find_fundec_with_name
-                          fun_var.vname 
-                          in
-                          match fun_fd with
-                          | None -> ()
-                          | Some(fun_fd) ->
-                            (* 4 *)
-                              self#push_argument fun_fd e2;
-                            (* 1 *)
-                              if List.mem {fd=fun_fd; n_arg=tmp_n_arg }
-                              fun_arg_list then () else self#push_fun_arg_list { fd=fun_fd; n_arg =
-                                tmp_n_arg };
-                            (* 2 *)
-                            let fun_arg = self#find_nth_in_list fun_fd.sformals n
-                            in
-                            match fun_arg with
-                            | None -> ()
-                            | Some(v) -> (*E.log " push_var loc: %a\n" d_loc
-                            loc ;*)self#push_var v;
-                            helper_2 next;
-                      in 
-                      helper_2 n_arg;
-                      (* 3 *)
-                      match lv with
-                      | None -> ()
-                      | Some(lv) -> self#check_lv lv loc; 
+                    self#process_function_call arg_var fun_var n_arg lv e2 loc
                   end
                 else helper tail;
            in
@@ -422,6 +372,39 @@ class instrVisitor (class_type,offset_name,last_record :string*string*record)= o
            DoChildren
        | _ -> SkipChildren
 
+  method process_function_call (arg_var:varinfo) (fun_var:varinfo) (n_arg: int
+  list) (lv: lval option) (e2:exp list) (loc: location) = 
+    let rec helper_2 (tmp_n_arg:int list) = 
+      match tmp_n_arg with
+      |[] -> ()
+      |n::next -> 
+          let rec fun_fd = self#find_fundec_with_name
+        fun_var.vname 
+        in
+        match fun_fd with
+        | None -> ()
+        | Some(fun_fd) ->
+          (* 4 *)
+            self#push_argument fun_fd e2 loc;
+          (* 1 *)
+            if List.mem {fd=fun_fd; n_arg=tmp_n_arg }
+            fun_arg_list then () else self#push_fun_arg_list { fd=fun_fd; n_arg =
+              tmp_n_arg };
+          (* 2 *)
+          let fun_arg = self#find_nth_in_list fun_fd.sformals n
+          in
+          match fun_arg with
+          | None -> ()
+          | Some(v) -> (*E.log " push_var loc: %a\n" d_loc
+          loc ;*)self#push_var v;
+          helper_2 next;
+    in 
+    helper_2 n_arg;
+    (* 3 *)
+    match lv with
+    | None -> ()
+    | Some(lv) -> self#check_lv lv loc; 
+    
   method print_func_argument( v_list: varinfo list) =
     let rec helper t_list = 
       match t_list with
@@ -472,11 +455,13 @@ Cfg.computeFileCFG file;
 (* do the AST analysis *)
   let last_record = {funList=[]; fun_arg_list=[]; varList=[]} 
   and last_record2 = {funList=[]; fun_arg_list=[]; varList=[]}
-in
- let vis = new instrVisitor("rsa_st","p",last_record)
+  and oc = open_out "openssl-result.dat"
+  in
+ let vis = new instrVisitor("rsa_st","p",last_record,oc)
  (*let vis = new instrVisitor("ssl_private_key","c",last_record)*)
 
 in
+E.logChannel := oc;
 ignore(visitCilFile (vis:> cilVisitor) file);
 ignore(visitCilFile (vis:> cilVisitor) file);
 vis#extractor;
@@ -495,9 +480,6 @@ done;
 
 vis#dedup;
 (* print out the result *)
-let oc = open_out "openssl-result.dat" 
-in
-E.logChannel := oc;
 E.log "---------------Begin print varList-------------\n";
 List.iter (function(v) -> E.log "%a%s -- %a\n" d_type v.vtype
 v.vname d_loc v.vdecl) vis#get_varList;
