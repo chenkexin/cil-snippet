@@ -31,10 +31,14 @@ Usage:
 ==========
 
 to see how CIL works on each line of code: 
+
     make run-ciltest1
 to run the analysis: 
+
     make run-ciltest2
 to run test case for function pointer:
+
     make run-ciltest3
 to run test case for macro:
+
     make run-ciltest4
