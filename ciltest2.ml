@@ -25,6 +25,9 @@ type record =
     mutable fun_arg_list: fundec list;
 
     mutable pList:offset list;
+
+    mutable resultList: location list;
+    mutable lvList: lval list;
   }
   
 class instrVisitor (class_type,offset_name,snd_offset_name,last_record,oc
@@ -32,7 +35,7 @@ class instrVisitor (class_type,offset_name,snd_offset_name,last_record,oc
   inherit nopCilVisitor
   
   (* the list holding possible variables *)
-  val mutable varList : varinfo list = []
+  val mutable varList : varinfo list = last_record.varList;
 
   (* maybe we don't need function list *)
   val mutable funList : fundec list = []
@@ -42,7 +45,7 @@ class instrVisitor (class_type,offset_name,snd_offset_name,last_record,oc
   val mutable t_fun_arg_list : fundec list = []
 
   (* the list holding  possible pointers *)
-  val mutable pList : offset list = []
+  val mutable pList : offset list = last_record.pList;
 
   method get_varList = varList
 
@@ -385,8 +388,13 @@ class instrVisitor (class_type,offset_name,snd_offset_name,last_record,oc
         if (f.fcomp.cname = class_type) && ( f.fname = offset_name) 
         then
           begin
-            self#push_p o;
-            DoChildren;
+            if List.length varList = 0 
+            then 
+              begin
+              self#push_p o;
+              DoChildren;
+              end
+            else DoChildren;
           end
         else 
           DoChildren;
@@ -394,8 +402,8 @@ class instrVisitor (class_type,offset_name,snd_offset_name,last_record,oc
     in
     offset_helper o; 
 
-  method vinst( i: instr) :instr list visitAction = 
-     match i with
+  method vinst( i: instr) :instr list visitAction =  
+    match i with
        | Set(lv, e, loc) ->
            let helper = 
            let c_var = self#find_var_in_exp e
@@ -487,6 +495,79 @@ class sndVisitor( snd_offset_type,snd_offset_name,last_record,oc:string*string*r
 = object (self)
   inherit nopCilVisitor
 
+  val mutable varList: varinfo list = []
+  val mutable pList: offset list = []
+  val mutable resultList: location list = [] 
+  val mutable lvList: lval list =[]
+
+  method get_result = 
+    last_record.varList <- varList;
+    last_record.pList <- pList;
+    last_record.resultList <- resultList;
+    last_record.lvList<- lvList;
+  (* dedup all lists *) 
+  method dedup  = 
+    let rec dedup_helper tmp_list = 
+    match tmp_list with
+    | [] -> []
+    | head::tail -> if (List.mem head tail) then dedup_helper tail else
+      head::(dedup_helper tail)
+    in
+    varList <- dedup_helper varList;
+    resultList <- dedup_helper resultList;
+    pList <- dedup_helper pList;
+  
+  method push_var v = 
+    varList <- v::varList;
+  method push_p o = 
+    pList <- o::pList;
+  method push_result l =
+    resultList <- l::resultList;
+
+  method find_exp e = 
+     let rec match_e e = 
+      let rec match_lv lv = 
+          begin
+          match fst lv with
+          | Var(v) -> if List.mem v varList then true else false;
+          | Mem(m) -> if List.mem (snd lv) pList then begin true end else match_e m;
+          end
+      in
+        match e with
+        | Lval(lv) -> match_lv lv;
+        | SizeOfE(e) -> match_e e;
+        | AlignOfE(e) -> match_e e;
+        | UnOp( _, e, _) -> match_e e;
+        | BinOp( _, e1, e2, _) -> match_e e1; match_e e2;
+        | CastE( _, e) -> match_e e;
+        | AddrOf(lv) -> match_lv lv;
+        | StartOf(lv) -> match_lv lv;
+        | _ -> false ;
+    in
+    match_e e
+
+  method find_var_in_lval (lv:lval) = 
+    let rec local lv = 
+      match fst lv with
+      | Var(v) -> Some(v);
+      | Mem(m) -> 
+          let tmp = self#find_lval_in_exp m 
+          in
+          match tmp with
+          | None -> None;
+          | Some(tmp) -> local tmp;
+    in
+    local lv;
+
+  method find_p_in_lval (lv:lval) = 
+    let rec local lv = 
+      match snd lv with
+      | NoOffset -> None;
+      | Field(f,o) -> Some(o);
+      | Index( e, o) -> Some(o);
+    in
+    local lv;
+
   method find_lval_in_exp (e:exp) = 
     let rec match_e e = 
       match e with
@@ -500,66 +581,395 @@ class sndVisitor( snd_offset_type,snd_offset_name,last_record,oc:string*string*r
       | StartOf(lv) -> Some(lv);
       | _ -> None;
     in
-    match_e e
-   method local_field_helper f =
+    match_e e;
+
+  method local_field_helper f loc=
    match f with
    | NoOffset -> false;
-   | _ -> true; 
+   | Field(f, o) -> if (f.fname = snd_offset_name)&&(f.fcomp.cname = "bignum_st")
+        then
+         begin
+           (*self#match_offset o loc;*)
+           self#match_offset o loc;
+           true;
+         end
+        else false;
+   | Index(e, o) -> let tmp_v = self#find_var_in_exp e 
+    in 
+    match tmp_v with
+    | Some(tmp_v) ->(*E.log "var loc: %a\n"
+  d_loc tmp_v.vdecl;  E.log "inIndex \n";*) self#push_result loc; false;
+    |None -> self#push_result loc; false;
+  method match_offset o loc = 
+   match o with
+   | Index( e,o) -> self#push_result loc; true;
+   | _ -> false;
 
-  method local_var_off_helper off = 
-    if List.mem off last_record.pList then true else false
+  method local_var_off_helper off loc = 
+    if List.mem off last_record.pList  
+    then 
+      begin
+      self#local_field_helper off loc 
+      end 
+   else false
 
    method local_var_helper v loc=
      match v with
      | Var(v) ->(* E.log "var: %s var_loc %a\n" v.vname d_loc v.vdecl;  *)
-         if List.mem v last_record.varList then begin(* E.log "ture\n";*) true; end else false;
+         if List.mem v last_record.varList 
+         then true
+         else false;
      | Mem(m) ->
          let tmp = self#find_lval_in_exp m
          in
          match tmp with
          | Some(tmp) -> self#local_var_helper (fst tmp) loc;
          | None -> false;
-  
-  method process_lv tmp loc =
-           match tmp with
+ 
+  (* check if exp contains the p->d *) 
+  method process_exp tmp loc =
+    let tmp_lv = self#find_lval_in_exp tmp 
+    in       
+    match tmp_lv with
            | Some(lv)->
-               (* E.log "in process_lv, lval: %a loc: %a\n" d_lval lv d_loc*)
-                 loc;
                if (self#local_var_helper (fst lv) loc)  
                then 
-                 begin 
-                 if (self#local_field_helper (snd lv))
-                   then 
-                     begin
-                       E.log "%a: %a\n"d_lval lv d_loc loc;
-                        true; 
-                      end
+                 begin
+                 if (self#local_field_helper (snd lv) loc )
+                   then begin self#push_lv lv;true;end
                  else false; 
                  end
-               else if (self#local_var_off_helper (snd lv)) 
-                   then 
-                     begin
-                       E.log "%a: %a\n" d_lval lv d_loc loc;
-                       true 
-                     end
+               else if (self#local_var_off_helper (snd lv) loc) 
+                   then begin self#push_lv lv;true;end
                  else false;
-               (*else faddlse; *)
            | None -> false;
- 
+  
+  method find_var_in_exp (e: exp) = 
+    let rec match_e e = 
+      let rec match_lv lv = 
+        match fst lv with
+        | Var(v) -> Some(v)
+        | Mem(m) -> match_e m
+      in
+        match e with
+        | Lval(lv) -> match_lv lv;
+        | SizeOfE(e) -> match_e e;
+        | AlignOfE(e) -> match_e e;
+        | UnOp( _, e, _) -> match_e e;
+        | BinOp( _, e1, e2, _) -> match_e e1; match_e e2;
+        | CastE( _, e) -> match_e e;
+        | AddrOf(lv) -> match_lv lv;
+        | StartOf(lv) -> match_lv lv;
+        | _ -> None;
+    in
+    match_e e
+
+  method push_lv (lv:lval) = lvList <- lv::lvList;
+  method get_varList = varList;  
+  method get_pList = pList; 
+  method get_lvList = lvList;
   method vinst( i: instr) : instr list visitAction = 
     match i with
     | Set( lv, e, loc) ->
-        (* this method should check if the e has var in varList and offset is d.
-         * if so, just print the location, do not push. *)
-      (*E.log "in Set, lval: %a e: %a loc:%a \n" d_lval lv d_exp e d_loc loc;*)
-           let tmp = self#find_lval_in_exp(e) 
-           in
-           self#process_lv tmp loc;
-           DoChildren;
-    | Call(lv, e1, e2, loc) -> DoChildren;
+        self#process_exp e loc;
+        DoChildren;
+    | Call(lv, e1, e2, loc) ->
+        let local =  
+        match lv with
+        | Some(lv) ->DoChildren;
+        |None -> DoChildren;
+        in
+        local;
     | _ -> DoChildren;
 end
 
+(* ?*)
+class thirdVisitor (last_record, oc: record*out_channel) = object (self)
+  inherit nopCilVisitor
+  val mutable third_varList :varinfo list = []
+  val mutable third_pList: offset list = []
+  method push_var v = third_varList <- v::third_varList;
+  method push_p p = third_pList <- p::third_pList;
+  method get_pList = third_pList;
+  method get_varList = third_varList;
+ method get_result =
+   last_record.varList <- third_varList;
+  method find_lv_in_exp( e:exp) =
+    let rec match_e e = 
+      match e with
+      | Lval(lv) -> Some(lv);
+      | SizeOfE(e) -> match_e e;
+      | AlignOfE(e) -> match_e e;
+      | UnOp( _, e, _) -> match_e e;
+      | BinOp( _, e1, e2, _) -> match_e e1; match_e e2;
+      | CastE( _, e) -> match_e e;
+      | AddrOf(lv) -> Some(lv);
+      | StartOf(lv) -> Some(lv);
+      | _ -> None;
+    in
+    match_e e
+  method push_lv (lv: lval) loc =
+    let helper = 
+    let match_snd off =
+       match off with
+       | NoOffset -> false;
+       | Field(_,_) -> true;
+       (* if an lv is Var with index, it should be pushed into varList
+        * if an lv is Mem with index, how? same with Field 
+        * *)
+       | Index(_,_) -> true;
+      in
+      match fst lv with
+      | Var(v) -> (*E.log "push var: %s \n" v.vname ;*) self#push_var v;
+      | Mem(m) -> if match_snd (snd lv) then self#push_p
+      (snd lv) else 
+      begin 
+      let m_var = self#find_var_in_exp m
+      in
+      match m_var with
+      | None -> ()
+      | Some( m_var ) ->
+      self#push_var m_var; 
+      end
+    in
+    helper;
+
+  method find_var_in_exp (e: exp) = 
+    let rec match_e e = 
+      let rec match_lv lv = 
+        match fst lv with
+        | Var(v) -> Some(v)
+        | Mem(m) -> match_e m
+      in
+        match e with
+        | Lval(lv) -> match_lv lv;
+        | SizeOfE(e) -> match_e e;
+        | AlignOfE(e) -> match_e e;
+        | UnOp( _, e, _) -> match_e e;
+        | BinOp( _, e1, e2, _) -> match_e e1; match_e e2;
+        | CastE( _, e) -> match_e e;
+        | AddrOf(lv) -> match_lv lv;
+        | StartOf(lv) -> match_lv lv;
+        | _ -> None;
+    in
+    match_e e
+  
+    (* dedup all lists *) 
+  method dedup  = 
+    let rec dedup_helper tmp_list = 
+    match tmp_list with
+    | [] -> []
+    | head::tail -> if (List.mem head tail) then dedup_helper tail else
+      head::(dedup_helper tail)
+    in
+    third_varList <- dedup_helper third_varList;
+
+  method vinst( i:instr) : instr list visitAction = 
+    match i with
+    | Set( lv, e, loc) ->
+        let tmp_lv = self#find_lv_in_exp e
+        in
+        let helper tmp_lv = 
+        match tmp_lv with
+        | Some(tmp_lv) ->
+        if List.mem tmp_lv last_record.lvList 
+        then 
+          begin 
+            (*E.log "loc: %a\n" d_loc loc; *)
+            self#push_lv lv loc; 
+            DoChildren; 
+          end
+        else DoChildren;
+        | None -> DoChildren;
+        in
+        helper tmp_lv;
+    | Call(lv,e1,e2,loc) -> 
+        DoChildren;
+    | _ -> DoChildren;
+end
+
+
+(* this class should check last process's result *)
+(* last: p->d *)
+(* this: should check d[i] *)
+class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
+  inherit nopCilVisitor
+  val mutable array_varList : varinfo list =  []
+  val mutable array_resultList : location list =  []
+  val mutable tmpList: varinfo list = []
+
+
+  method push_tmp t = tmpList <- t::tmpList;
+  method push_v v = array_varList <- v::array_varList;
+  method push_result r = array_resultList <- r::array_resultList;
+  method get_result = 
+    last_record.varList <- array_varList;
+    last_record.resultList <- array_resultList;
+  method get_varList = array_varList;
+  method get_tmpList = tmpList;
+
+  (* give a lval, judge if the lval is *(ap++) *)
+  method match_exp (some_v:lval) loc =
+        (* this is helper function which checks if *tmp___3 *) 
+        let helper2 v = 
+        match v with
+        | Mem(m) -> 
+        (* this exp contains *tmp___3 *)
+        let local = 
+          match m with
+          | BinOp(_,e1,e2,_) -> 
+              (* e1 should be in {s}  and e2 should be a const *)
+              (* this is the helper function which checks if *(dst+i) *)
+              let tmp_var = self#find_var_in_exp e1
+              in   
+              let check_e1_e2 = 
+              match tmp_var with
+              | Some(v) -> 
+                  if List.mem v last_record.varList 
+                  then 
+                    begin
+                      let check_snd = 
+                        match e2 with
+                        | Const(_) ->true;
+                        | Lval(l) -> 
+                            let tmp = 
+                              match fst l with
+                              | Var(v) -> true;
+                              | _ -> false;
+                            in
+                            tmp;
+                        | _ -> false;
+                      in
+                      check_snd;
+                    end
+                  else false;
+              | None -> false;
+              in
+              check_e1_e2;
+          | Lval(l)->
+              let helper = 
+                match fst l with
+                | Var(v)->
+                    if List.mem v last_record.varList
+                    then 
+                        let local2 = 
+                          match (snd some_v ) with
+                          | NoOffset -> true;
+                          | _ ->false;
+                        in
+                        local2;
+                     else false;
+                | _ -> false;
+              in
+              helper;
+          | _->false;
+        in
+        local;
+        | _ ->false;
+        in
+        helper2 (fst some_v);
+
+  method match_fst_single (f:lhost)  =
+    let local = match f with
+    | Var(v) -> if List.mem v last_record.varList then begin (* E.log "%s true"
+    v.vname; *)true end else false;
+    | Mem(m) ->
+        let tmp = self#find_var_in_exp m
+        in
+        match tmp with
+        | Some(v) ->
+            if List.mem v last_record.varList then true else false;
+        | None -> false;
+    in local;
+
+  method match_snd (s:offset) = 
+    match s with
+    | NoOffset -> false;
+    | Field(f,o) -> 
+        let helper o =
+          match o with
+          | Index(e,o) -> true;
+          | _ -> false;
+        in
+        if f.fname = "d" then begin helper o; end else false;
+    |Index(e,o)-> true;
+
+  method find_var_in_exp (e: exp) = 
+    let rec match_e e = 
+      let rec match_lv lv = 
+        match fst lv with
+        | Var(v) -> (* E.log "in find_var_in_exp: return varinfo %s\n" v.vname
+        ;*) Some(v)
+        | Mem(m) -> match_e m
+      in
+        match e with
+        | Lval(lv) -> match_lv lv;
+        | SizeOfE(e) -> match_e e;
+        | AlignOfE(e) -> match_e e;
+        | UnOp( _, e, _) -> match_e e;
+        | BinOp( _, e1, e2, _) -> match_e e1; match_e e2;
+        | CastE( _, e) -> match_e e;
+        | AddrOf(lv) -> match_lv lv;
+        | StartOf(lv) -> match_lv lv;
+        | _ -> None;
+    in
+    match_e e
+  method check_type_ulong vtype =
+   match vtype with
+   | TPtr(_,a) -> true; 
+   | _ ->false;
+
+   (* check if the exp is *p or p[i] *)
+  method check_exp e loc = 
+    let tmp_lv = self#find_lv_in_exp e
+    in
+    match tmp_lv with
+    | Some(tmp_lv) -> self#check_lv tmp_lv loc;
+    | None -> ();
+  
+  method find_lv_in_exp( e:exp) =
+    let rec match_e e = 
+      match e with
+      | Lval(lv) -> Some(lv);
+      | SizeOfE(e) -> match_e e;
+      | AlignOfE(e) -> match_e e;
+      | UnOp( _, e, _) -> match_e e;
+      | BinOp( _, e1, e2, _) -> match_e e1; 
+      | CastE( _, e) -> match_e e;
+      | AddrOf(lv) -> Some(lv);
+      | StartOf(lv) -> Some(lv);
+      | _ -> None;
+    in
+    match_e e
+
+    (* check if lv is *p or p[i] *)
+  method check_lv (tmp_lv:lval) loc =
+    (*E.log "in check_lv: %a %a\n" d_lval tmp_lv d_loc loc; *)
+        if (self#match_exp tmp_lv loc) then E.log "AAA %a %a\n" d_lval tmp_lv d_loc loc else ();
+        if self#match_fst_single (fst tmp_lv)  
+        then
+        begin
+        if self#match_snd (snd tmp_lv) 
+        then 
+          begin 
+          E.log "AAA %a %a\n" d_lval tmp_lv d_loc loc;
+          end
+        else ();
+        end
+      else (); 
+
+  method vinst( i :instr) : instr list visitAction = 
+    match i with
+    | Set(lv, e, loc) ->
+        (* check whether e or lv contains d[i] *)
+        self#check_exp e loc;
+        self#check_lv lv loc;
+        (*self#check_lv lv loc; *)
+        DoChildren;
+    | Call(lv, e1, e2, loc) -> DoChildren;
+    | _ -> DoChildren;
+
+end 
 (*------------------------------------ begin ------------------------------------*)
 
 (* load all *.i file in openssl-file *)
@@ -576,9 +986,9 @@ end
 let () =  
   let files = 
     input_file "openssl-files" 
-  in 
+  in  
   let  files = List.map( fun filename -> let f = Frontc.parse filename in f() ) files 
-    in 
+    in
     let file = Mergecil.merge files "test" 
     in
 Rmtmps.removeUnusedTemps file;
@@ -586,13 +996,13 @@ Rmtmps.removeUnusedTemps file;
 Cfg.computeFileCFG file;
 
 (* do the AST analysis *)
-  let last_record = {funList=[]; fun_arg_list=[]; varList=[]; pList=[]} 
-  and last_record2 = {funList=[]; fun_arg_list=[]; varList=[]; pList=[]}
-  and oc = open_out "openssl-result-p.dat"
+  let last_record = {funList=[]; fun_arg_list=[]; varList=[]; pList=[];
+  resultList=[]; lvList = []} 
+and last_record2 = {funList=[]; fun_arg_list=[]; varList=[]; pList=[];
+resultList=[]; lvList = []}
+  and oc = open_out "tmp-openssl-result-p.dat"
   in
  let vis = new instrVisitor("rsa_st","p","d",last_record,oc)
- (*let vis = new instrVisitor("ssl_private_key","c",last_record)*)
-
 in
 E.logChannel := oc;
 ignore(visitCilFile (vis:> cilVisitor) file);
@@ -600,6 +1010,7 @@ ignore(visitCilFile (vis:> cilVisitor) file);
 vis#extractor;
 vis#dedup;
 vis#get_result;
+(* get the propagation of rsa->p *)
 while (List.length last_record.varList != List.length last_record2.varList)
 &&(List.length last_record.fun_arg_list != List.length last_record2.fun_arg_list) 
 do
@@ -610,24 +1021,45 @@ do
   vis#dedup;
   vis#get_result;
 done;
+
 (*vis#dedup;*)
-let oc = open_out "openssl-result-p.dat"
+let oc = open_out "tmp-openssl-result-p.dat"
 in
 let vis = new sndVisitor("BN_ULONG","d", last_record,oc)
 in
+(* get the reference from rsa->p to rsa->p->d *)
 E.logChannel := oc;
 ignore(visitCilFile (vis:>cilVisitor) file);
+vis#dedup;
+vis#get_result;
+(*E.log "---------------Begin print varList 1-------------\n";
+List.iter (function(v) -> E.log "%a\n" d_lval v) vis#get_lvList;*)
+let vis = new thirdVisitor(last_record, oc)
+in
+ignore(visitCilFile (vis:>cilVisitor) file);
+vis#get_result;
+
+(* get the propagation of rsa->p->d *)
+let vis = new instrVisitor("","","",last_record,oc)
+in
+ignore(visitCilFile(vis:>cilVisitor) file);
+ignore(visitCilFile(vis:>cilVisitor) file);
+ignore(visitCilFile(vis:>cilVisitor) file);
+vis#get_result;
+(*E.log "---------------Begin print varList 2-------------\n";
+List.iter (function(v) -> E.log " in print: %s loc: %a\n" v.vname d_loc v.vdecl) last_record.varList;
+*)
+
+(* check the last result(pointers) contains *p or p[i] *)
+let vis = new checkArrayVisitor(last_record,oc)
+in
+ignore(visitCilFile(vis:>cilVisitor) file);
 
 (* print out the result *)
 (*E.log "---------------Begin print varList-------------\n";
 List.iter (function(v) -> E.log "%a%s -- %a\n" d_type v.vtype
 v.vname d_loc v.vdecl) vis#get_varList;
-E.log "\n--------------------used fun list ------------\n";
-List.iter (function(e) -> E.log "%s %a\n" e.svar.vname d_loc e.svar.vdecl )
-last_record.fun_arg_list;
-E.log "\n------------------pointer list------------------\n";
-List.iter (function(p) -> 
-  match p with 
- | Field(f,o) -> E.log "%s\n" f.fname 
- | _ -> () ) vis#get_pList;
- *)
+E.log "---------------Begin print loc-------------\n";
+List.iter (function(v) -> E.log "-- %a\n" d_loc v) last_record.resultList;
+
+*)
