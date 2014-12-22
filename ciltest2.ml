@@ -478,13 +478,13 @@ class sndVisitor( snd_offset_type,snd_offset_name,last_record,oc:string*string*r
 
   val mutable varList: varinfo list = []
   val mutable pList: offset list = []
-  val mutable resultList: location list = [] 
   val mutable lvList: lval list =[]
+
+  val mutable resultList : location list =[]
 
   method get_result = 
     last_record.varList <- varList;
     last_record.pList <- pList;
-    last_record.resultList <- resultList;
     last_record.lvList<- lvList;
   (* dedup all lists *) 
   method dedup  = 
@@ -495,7 +495,6 @@ class sndVisitor( snd_offset_type,snd_offset_name,last_record,oc:string*string*r
       head::(dedup_helper tail)
     in
     varList <- dedup_helper varList;
-    resultList <- dedup_helper resultList;
     pList <- dedup_helper pList;
   
   method find_var_in_lv( l:lval) = 
@@ -506,8 +505,8 @@ class sndVisitor( snd_offset_type,snd_offset_name,last_record,oc:string*string*r
     varList <- v::varList;
   method push_p o = 
     pList <- o::pList;
-  method push_result l =
-    resultList <- l::resultList;
+  method push_result loc = 
+    resultList <- loc::resultList;
 
   method find_exp e = 
      let rec match_e e = 
@@ -781,8 +780,7 @@ class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
       * this form is used in checking pointer operation 
       * such as p->d[i] or dst++. *)
   method check_e2 e2 =
-    (*E.log "check_e2 %a\n" d_exp e2;
-     *) match e2 with
+      match e2 with
       | Const(_) ->true;
       | Lval(l) ->
           let tmp = 
@@ -792,7 +790,6 @@ class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
                 let mem_helper (o:offset) = 
                   match o with
                   | Field(f,o) -> let field_helper =
-                    E.log "f type: %a\n" d_type f.ftype;
                     match f.ftype with
                     | TInt(c,a) ->true; 
                     | _->false;
@@ -805,9 +802,7 @@ class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
           tmp;
       | BinOp(_,t_e1,t_e2,_) ->
           (* like d->[div_n + 1], the e2 again becomes an BinOp *)
-          if (self#check_e2 t_e1) && (self#check_e2 t_e2) then begin
-           true end  else begin 
-          false;end
+          if (self#check_e2 t_e1) && (self#check_e2 t_e2) then true else false;
       | _ -> false;
   
       (* check if e1 is sdiv->d.
@@ -831,8 +826,7 @@ class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
                     let local_lv = 
                     match fst tmp_lv with
                     | Var(v) -> 
-                    if (List.mem v last_record.varList) 
-                    then begin true end else false;
+                    if (List.mem v last_record.varList) then begin true end else false;
                     | Mem(mm) -> false;
                     in
                     local_lv;
@@ -853,7 +847,6 @@ class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
  
  (* give a lval, judge if the lval is *(ap++) or *(sdiv->d) + n *)
   method match_exp (some_v:lval) loc =
-    (*E.log "match_exp :%a some_v:%a\n" d_loc loc d_lval some_v; *)
         let helper2 v = 
         match v with
         | Mem(m) -> 
@@ -870,15 +863,7 @@ class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
           | Lval(l)->
               let helper = 
                 match fst l with
-                | Var(v)->
-                   (* if List.mem v last_record.varList 
-                    then
-                     if self#match_snd (snd some_v)
-                     then
-                         false;
-                     else false
-                       (* no extra ->d here, can check *d *)
-                    else*)   false;
+                | Var(v)-> false;
                 | _ -> false;
               in
               helper;
@@ -886,9 +871,7 @@ class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
           | _-> false;
         in
         local;
-        | Var(v) -> (*E.log "in match_exp: lval: %a v:%s\n" d_lval some_v
-        v.vname;*)
-        false;
+        | Var(v) ->false;
         in
         helper2 (fst some_v);
 
@@ -936,11 +919,14 @@ class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
             match e with
             | BinOp(_,e1,e2,_) ->
               if self#check_var_star_d e1 e2 
-              then   
-                E.log "?AA %a %a\n" d_exp e d_loc loc 
+              then  begin 
+                E.log "?AA %a %a\n" d_exp e d_loc loc;
+                self#push_result loc 
+              end
               else
                if self#check_lval_star_d e1 e2
-               then E.log "?AA %a %a\n" d_exp e d_loc loc 
+               then begin E.log "?AA %a %a\n" d_exp e d_loc loc; 
+                self#push_result loc end 
             | _ ->();
             in local;
          self#check_lv tmp_lv loc;
@@ -967,8 +953,9 @@ class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
   method check_lv (tmp_lv:lval) loc =
     (*E.log "in check_lv: %a %a\n" d_lval tmp_lv d_loc loc; *)
         if (self#match_exp tmp_lv loc) 
-        then 
-          E.log "?AA %a %a\n" d_lval tmp_lv d_loc loc 
+        then begin 
+          E.log "?AA %a %a\n" d_lval tmp_lv d_loc loc; 
+                self#push_result loc end 
         else ();
   
   method vinst( i :instr) : instr list visitAction = 
@@ -992,6 +979,67 @@ class checkArrayVisitor ( last_record,oc: record*out_channel ) = object (self)
 
 end
 
+class funcSelector( last_record,oc: record*out_channel) = object (self)
+  inherit nopCilVisitor  
+
+  val mutable fundecList : (fundec list) = [];
+ 
+  val mutable cur_fundec :fundec = dummyFunDec;
+
+  method push_fundec f = fundecList <- f::fundecList;
+ 
+  method getFundecList = fundecList;
+  
+  method dedup  = 
+    let rec dedup_helper tmp_list = 
+    match tmp_list with
+    | [] -> []
+    | head::tail -> if (List.mem head tail) then dedup_helper tail else
+      head::(dedup_helper tail)
+    in
+    fundecList <- dedup_helper fundecList;
+  
+  method getBlock (b:block) =
+    List.iter self#getInstrList b.bstmts
+
+  (* search through the result set to see if the location in the result set *)
+  (* return true if it is, false else. *)
+  method search_loc (loc:location) =
+    if List.mem loc last_record.resultList 
+    then true else false;
+
+  method getInstr (i: instr list) =
+   List.iter (
+     function(t_i) -> 
+     match t_i with
+    | Set(lv,e,loc) ->
+        (* check if this loc contains in result set. *)
+        if self#search_loc loc
+        then 
+          self#push_fundec cur_fundec
+        else ();
+    | Call(lv,e1,e2,loc) ->();
+    | _ -> (); ) i 
+
+  method getInstrList (st: stmt) = 
+   match st.skind with
+   | Instr i -> 
+       self#getInstr i;
+   | If( _, tb, fb, _) -> 
+       self#getBlock tb;
+       self#getBlock fb;
+   | Switch(_,b,_,_) ->
+       self#getBlock b;
+   | Loop(b,_,_,_) ->
+       self#getBlock b;
+   | _ -> ();
+
+  method vfunc (f:fundec) = 
+    cur_fundec <- f;
+    self#getBlock f.sbody;
+    DoChildren;
+
+end
 (*------------------------------------ begin ------------------------------------*)
 
 (* load all *.i file in openssl-file *)
@@ -1076,4 +1124,15 @@ vis#get_result;
 let vis = new checkArrayVisitor(last_record,oc)
 in
 ignore(visitCilFile(vis:>cilVisitor) file);
+
+vis#get_result;
+
+let vis = new funcSelector( last_record,oc) 
+in
+ignore(visitCilFile(vis:>cilVisitor) file);
+vis#dedup;
+
+E.log "---------------Begin print loc list-------------\n";
+List.iter (function(v) -> E.log " fundec: %s \n" v.svar.vname)
+vis#getFundecList;
 
