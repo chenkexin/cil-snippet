@@ -60,7 +60,6 @@ main ()
   p_cert->pkey = p_cert_pkey;
   p_cert->valid = 3;
  
-  SSL* p_ssl = calloc(sizeof(SSL), 0);
   p_ssl->cert = p_cert;
   p_ssl->tmp_pointer = &i_tmp;  
 
